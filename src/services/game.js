@@ -18,20 +18,61 @@ function dateSeed(dateStr) {
   return Math.abs(hash);
 }
 
+// Pick locations ensuring continent diversity (no two from the same continent per round)
+function pickDiverse(shuffled, count) {
+  const picked = [];
+  const usedContinents = new Set();
+  for (const loc of shuffled) {
+    if (picked.length >= count) break;
+    if (!usedContinents.has(loc.continent)) {
+      picked.push(loc);
+      usedContinents.add(loc.continent);
+    }
+  }
+  // If we still need more (only 7 continents, count=5 should be fine), allow repeats
+  if (picked.length < count) {
+    for (const loc of shuffled) {
+      if (picked.length >= count) break;
+      if (!picked.includes(loc)) {
+        picked.push(loc);
+      }
+    }
+  }
+  return picked;
+}
+
 export function getDailyLocations() {
   const today = new Date().toISOString().slice(0, 10);
   const rand = seededRandom(dateSeed(today));
   const shuffled = [...locations].sort(() => rand() - 0.5);
-  // Pick a mix of difficulties
-  const easy = shuffled.filter(l => l.difficulty === 'easy');
-  const medium = shuffled.filter(l => l.difficulty === 'medium');
-  const hard = shuffled.filter(l => l.difficulty === 'hard');
-  return [easy[0], medium[0], medium[1], hard[0], easy[1]].filter(Boolean);
+  return pickDiverse(shuffled, 5);
+}
+
+// Track recently seen locations to avoid repeats in practice mode
+const RECENT_KEY = 'globetap_recent_locations';
+const RECENT_MAX = 50; // remember last 50 locations
+
+function getRecentLocations() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveRecentLocations(names) {
+  const recent = getRecentLocations();
+  const updated = [...names, ...recent].slice(0, RECENT_MAX);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
 }
 
 export function getRandomLocations(count = 5) {
-  const shuffled = [...locations].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  const recent = new Set(getRecentLocations());
+  // Prefer locations not recently seen
+  const fresh = locations.filter(l => !recent.has(l.name));
+  const pool = fresh.length >= count * 3 ? fresh : locations;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const picked = pickDiverse(shuffled, count);
+  saveRecentLocations(picked.map(l => l.name));
+  return picked;
 }
 
 export function getTodayString() {
@@ -50,7 +91,6 @@ export function calculateDistance(lat1, lng1, lat2, lng2) {
 }
 
 // Score: 1000 max, decreasing with distance
-// 0 km = 1000, ~20000 km = 0
 export function calculateScore(distance) {
   const maxDist = 20000;
   const score = Math.max(0, Math.round(1000 * (1 - distance / maxDist)));
